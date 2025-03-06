@@ -5,21 +5,19 @@ const CURRENT_NBS_VERSION: u8 = 5;
 
 #[derive(Debug, Clone)]
 pub struct Instrument {
-    pub id: u8,
     pub name: Vec<u8>,
     pub file: Vec<u8>,
-    pub pitch: u8,
-    pub press_key: bool,
+    pub key: u8,
+    pub press_key: u8,
 }
 
 impl Instrument {
-    pub fn new(id: u8, name: Vec<u8>, file: Vec<u8>) -> Instrument {
+    pub fn new(key: u8, name: Vec<u8>, file: Vec<u8>, press_key: u8) -> Instrument {
         Instrument {
-            id,
             name,
             file,
-            pitch: 45,       // default
-            press_key: true, // default
+            key,
+            press_key,
         }
     }
 }
@@ -335,8 +333,21 @@ impl<'a> NbsParser<'a> {
     }
 
     fn parse_instruments(&mut self) -> io::Result<Vec<Instrument>> {
-        let instruments = Vec::new();
-        // Implement instrument parsing logic here if needed
+        let mut instruments = Vec::new();
+        // next u8 is the number of instruments
+        let num_instruments = self.read_u8();
+
+        for _ in 0..num_instruments {
+            let name = self.read_string()?;
+            let sound_file = self.read_string()?;
+            let sound_key = self.read_u8();
+            let press_key = self.read_u8();
+
+            let mut instrument = Instrument::new(sound_key, name, sound_file, press_key);
+            instrument.press_key = press_key;
+            instruments.push(instrument);
+        }
+
         Ok(instruments)
     }
 }
