@@ -34,15 +34,23 @@ pub struct Note {
 }
 
 impl Note {
-    pub fn new(tick: u16, layer: u16, instrument: u8, key: u8) -> Note {
+    pub fn new(
+        tick: u16,
+        layer: u16,
+        instrument: u8,
+        key: u8,
+        velocity: Option<u8>,
+        panning: Option<i8>,
+        pitch: Option<i16>,
+    ) -> Note {
         Note {
             tick,
             layer,
             instrument,
             key,
-            velocity: 100, // default
-            panning: 0,    // default
-            pitch: 0,      // default
+            velocity: velocity.unwrap_or(100), // default
+            panning: panning.unwrap_or(100),   // default
+            pitch: pitch.unwrap_or(0),         // default
         }
     }
 }
@@ -177,37 +185,19 @@ impl<'a> NbsParser<'a> {
         Ok(NbsFile::new(header, notes, layers, instruments))
     }
 
-    fn read_u16(&mut self) -> u16 {
-        let val = u16::from_le_bytes([self.current_data[0], self.current_data[1]]);
-        self.current_data = &self.current_data[2..];
-        val
-    }
-
-    fn read_u8(&mut self) -> u8 {
-        let val = self.current_data[0];
-        self.current_data = &self.current_data[1..];
-        val
-    }
-
-    fn read_i16(&mut self) -> i16 {
-        let val = i16::from_le_bytes([self.current_data[0], self.current_data[1]]);
-        self.current_data = &self.current_data[2..];
-        val
-    }
-
-    fn read_u32(&mut self) -> u32 {
-        let val = u32::from_le_bytes([
-            self.current_data[0],
-            self.current_data[1],
-            self.current_data[2],
-            self.current_data[3],
-        ]);
-        self.current_data = &self.current_data[4..];
-        val
+    fn read<T: Default + Copy>(&mut self) -> T {
+        let size = std::mem::size_of::<T>();
+        let bytes = &self.current_data[..size];
+        self.current_data = &self.current_data[size..];
+        let mut result = T::default();
+        unsafe {
+            std::ptr::copy_nonoverlapping(bytes.as_ptr(), &mut result as *mut T as *mut u8, size);
+        }
+        result
     }
 
     fn read_string(&mut self) -> io::Result<Vec<u8>> {
-        let len = self.read_u32() as usize;
+        let len = self.read::<u32>() as usize;
         let str = self.current_data[..len].to_vec();
         self.current_data = &self.current_data[len..];
         Ok(str)
@@ -219,26 +209,26 @@ impl<'a> NbsParser<'a> {
         let version = CURRENT_NBS_VERSION;
         self.current_data = &self.current_data[1..];
 
-        let default_instruments = self.read_u8();
-        let song_length = self.read_u16();
-        let song_layers = self.read_u16();
+        let default_instruments = self.read();
+        let song_length = self.read();
+        let song_layers = self.read();
         let song_name = self.read_string()?;
         let song_author = self.read_string()?;
         let original_author = self.read_string()?;
         let description = self.read_string()?;
-        let tempo = self.read_u16();
-        let auto_save = self.read_u8() != 0;
-        let auto_save_duration = self.read_u8();
-        let time_signature = self.read_u8();
-        let minutes_spent = self.read_u32();
-        let left_clicks = self.read_u32();
-        let right_clicks = self.read_u32();
-        let blocks_added = self.read_u32();
-        let blocks_removed = self.read_u32();
+        let tempo = self.read();
+        let auto_save = self.read::<u8>() != 0;
+        let auto_save_duration = self.read();
+        let time_signature = self.read();
+        let minutes_spent = self.read();
+        let left_clicks = self.read();
+        let right_clicks = self.read();
+        let blocks_added = self.read();
+        let blocks_removed = self.read();
         let song_origin = self.read_string()?;
-        let loop_flag = self.read_u8() != 0;
-        let max_loop_count = self.read_u8();
-        let loop_start = self.read_u16();
+        let loop_flag = self.read::<u8>() != 0;
+        let max_loop_count = self.read();
+        let loop_start = self.read();
 
         Ok(Header {
             version,
@@ -270,7 +260,7 @@ impl<'a> NbsParser<'a> {
         let mut current_tick: u16 = 0;
 
         while self.current_data.len() > 0 {
-            let jump_ticks = self.read_u16();
+            let jump_ticks: u16 = self.read();
             if jump_ticks == 0 {
                 break;
             }
@@ -278,16 +268,16 @@ impl<'a> NbsParser<'a> {
             current_tick += jump_ticks;
 
             while self.current_data.len() > 0 {
-                let jump_layers = self.read_u16();
+                let jump_layers: u16 = self.read();
                 if jump_layers == 0 {
                     break;
                 }
 
-                let instrument = self.read_u8();
-                let key = self.read_u8();
-                let velocity = self.read_u8();
-                let panning = self.read_u8() as i8 - 100;
-                let pitch = self.read_i16();
+                let instrument: u8 = self.read();
+                let key: u8 = self.read();
+                let velocity: u8 = self.read();
+                let panning: i8 = self.read();
+                let pitch: i16 = self.read();
 
                 notes.push(Note {
                     tick: current_tick,
@@ -314,9 +304,9 @@ impl<'a> NbsParser<'a> {
                 break;
             }
 
-            let lock = self.read_u8() != 0;
-            let volume = self.read_u8();
-            let panning = self.read_u8() as i8 - 100;
+            let lock = self.read::<u8>() != 0;
+            let volume: u8 = self.read();
+            let panning: i8 = self.read();
 
             layers.push(Layer {
                 id: layer_id,
@@ -335,13 +325,13 @@ impl<'a> NbsParser<'a> {
     fn parse_instruments(&mut self) -> io::Result<Vec<Instrument>> {
         let mut instruments = Vec::new();
         // next u8 is the number of instruments
-        let num_instruments = self.read_u8();
+        let num_instruments = self.read::<i8>();
 
         for _ in 0..num_instruments {
             let name = self.read_string()?;
             let sound_file = self.read_string()?;
-            let sound_key = self.read_u8();
-            let press_key = self.read_u8();
+            let sound_key = self.read::<u8>();
+            let press_key = self.read::<u8>();
 
             let mut instrument = Instrument::new(sound_key, name, sound_file, press_key);
             instrument.press_key = press_key;
