@@ -1,4 +1,4 @@
-use std::io::{self};
+use std::io::{self, Write};
 use std::vec::Vec;
 
 const CURRENT_NBS_VERSION: u8 = 5;
@@ -137,6 +137,9 @@ pub struct NbsFile {
     pub instruments: Vec<Instrument>,
 }
 
+/// NbsFile is used to store the data from a .nbs file
+/// It can be used to save the data to a file or to modify the data
+/// and save it to a new file
 impl NbsFile {
     pub fn new(
         header: Header,
@@ -166,6 +169,9 @@ impl NbsFile {
     }
 }
 
+/// NbsParser is used to parse the data from a .nbs file
+/// The data is stored in the NbsFile struct
+/// The parse method is used to parse the data from the file
 pub struct NbsParser<'a> {
     current_data: &'a [u8],
 }
@@ -206,52 +212,29 @@ impl<'a> NbsParser<'a> {
     fn parse_header(&mut self) -> io::Result<Header> {
         // remove the first 2 bytes
         self.current_data = &self.current_data[2..];
-        let version = CURRENT_NBS_VERSION;
         self.current_data = &self.current_data[1..];
-
-        let default_instruments = self.read();
-        let song_length = self.read();
-        let song_layers = self.read();
-        let song_name = self.read_string()?;
-        let song_author = self.read_string()?;
-        let original_author = self.read_string()?;
-        let description = self.read_string()?;
-        let tempo = self.read();
-        let auto_save = self.read::<u8>() != 0;
-        let auto_save_duration = self.read();
-        let time_signature = self.read();
-        let minutes_spent = self.read();
-        let left_clicks = self.read();
-        let right_clicks = self.read();
-        let blocks_added = self.read();
-        let blocks_removed = self.read();
-        let song_origin = self.read_string()?;
-        let loop_flag = self.read::<u8>() != 0;
-        let max_loop_count = self.read();
-        let loop_start = self.read();
-
         Ok(Header {
-            version,
-            default_instruments,
-            song_length,
-            song_layers,
-            song_name,
-            song_author,
-            original_author,
-            description,
-            tempo,
-            auto_save,
-            auto_save_duration,
-            time_signature,
-            minutes_spent,
-            left_clicks,
-            right_clicks,
-            blocks_added,
-            blocks_removed,
-            song_origin,
-            loop_flag,
-            max_loop_count,
-            loop_start,
+            version: CURRENT_NBS_VERSION,
+            default_instruments: self.read(),
+            song_length: self.read(),
+            song_layers: self.read(),
+            song_name: self.read_string()?,
+            song_author: self.read_string()?,
+            original_author: self.read_string()?,
+            description: self.read_string()?,
+            tempo: self.read(),
+            auto_save: self.read::<u8>() != 0,
+            auto_save_duration: self.read(),
+            time_signature: self.read(),
+            minutes_spent: self.read(),
+            left_clicks: self.read(),
+            right_clicks: self.read(),
+            blocks_added: self.read(),
+            blocks_removed: self.read(),
+            song_origin: self.read_string()?,
+            loop_flag: self.read::<u8>() != 0,
+            max_loop_count: self.read(),
+            loop_start: self.read(),
         })
     }
 
@@ -273,20 +256,14 @@ impl<'a> NbsParser<'a> {
                     break;
                 }
 
-                let instrument: u8 = self.read();
-                let key: u8 = self.read();
-                let velocity: u8 = self.read();
-                let panning: i8 = self.read();
-                let pitch: i16 = self.read();
-
                 notes.push(Note {
                     tick: current_tick,
                     layer: jump_layers,
-                    instrument,
-                    key,
-                    velocity,
-                    panning,
-                    pitch,
+                    instrument:self.read(),
+                    key:self.read(),
+                    velocity:self.read(),
+                    panning:self.read(),
+                    pitch:self.read(),
                 });
             }
         }
@@ -304,16 +281,12 @@ impl<'a> NbsParser<'a> {
                 break;
             }
 
-            let lock = self.read::<u8>() != 0;
-            let volume: u8 = self.read();
-            let panning: i8 = self.read();
-
             layers.push(Layer {
                 id: layer_id,
                 name,
-                lock,
-                volume,
-                panning,
+                lock:self.read::<u8>() != 0,
+                volume:self.read::<u8>(),
+                panning:self.read::< i8>(),
             });
 
             layer_id += 1;
@@ -341,6 +314,107 @@ impl<'a> NbsParser<'a> {
         Ok(instruments)
     }
 }
+
+/// NbsWriter is used get the data from the NbsFile and write it to a Vec<u8>
+/// The data can then be written to a file
+pub struct NbsWriter {
+    data: Vec<u8>,
+}
+
+
+impl NbsWriter {
+    pub fn new() -> NbsWriter {
+        NbsWriter { data: Vec::new() }
+    }
+
+    pub fn write_file(&mut self, file: &NbsFile) -> Vec<u8> {
+        self.write_header(&file.header);
+        self.write_notes(&file.notes);
+        self.write_layers(&file.layers);
+        self.write_instruments(&file.instruments);
+        
+        self.data.clone()        
+    }
+
+    fn write<T: Default + Copy>(&mut self, data: T) -> &mut NbsWriter {
+        let size = std::mem::size_of::<T>();
+        let bytes = unsafe {
+            let mut bytes = Vec::with_capacity(size);
+            bytes.set_len(size);
+            std::ptr::copy_nonoverlapping(&data as *const T as *const u8, bytes.as_mut_ptr(), size);
+            bytes
+        };
+        self.data.write_all(&bytes).unwrap();
+       self
+    }
+
+    fn write_string(&mut self, data: Vec<u8>) -> &mut NbsWriter {
+        self.write::<u32>(data.len() as u32);
+        self.data.write_all(&data).unwrap();
+        self
+    }
+
+    fn write_header(&mut self, header:&Header) {
+        // add 2 bytes for the version
+        self.write::<u8>(0).write::<u8>(0);
+        // write the header
+        self.write::<u8>(header.version)
+        .write::<u8>(header.default_instruments)
+        .write::<u16>(header.song_length)
+        .write::<u16>(header.song_layers)
+        .write_string(header.song_name.clone())
+        .write_string(header.song_author.clone())
+        .write_string(header.original_author.clone())
+        .write_string(header.description.clone())
+        .write::<u16>(header.tempo)
+        .write::<u8>(if header.auto_save { 1 } else { 0 })
+        .write::<u8>(header.auto_save_duration)
+        .write::<u8>(header.time_signature)
+        .write::<u32>(header.minutes_spent)
+        .write::<u32>(header.left_clicks)
+        .write::<u32>(header.right_clicks)
+        .write::<u32>(header.blocks_added)
+        .write::<u32>(header.blocks_removed)
+        .write_string(header.song_origin.clone())
+        .write::<u8>(if header.loop_flag { 1 } else { 0 })
+        .write::<u8>(header.max_loop_count)
+        .write::<u16>(header.loop_start);
+    }
+    fn write_notes(&mut self, notes:&Vec<Note>) {
+        let mut current_tick: u16 = 0;
+        for note in notes {
+            let jump_ticks = note.tick - current_tick;
+            self.write::<u16>(jump_ticks);
+            current_tick = note.tick;
+
+            self.write::<u16>(note.layer)
+            .write::<u8>(note.instrument)
+            .write::<u8>(note.key)
+            .write::<u8>(note.velocity)
+            .write::<i8>(note.panning)
+            .write::<i16>(note.pitch);
+        }
+    }
+    fn write_layers(&mut self, layers:&Vec<Layer>) {
+        
+        for layer in layers {
+            self.write_string(layer.name.clone())
+            .write::<u8>(if layer.lock { 1 } else { 0 })
+            .write::<u8>(layer.volume)
+            .write::<i8>(layer.panning);
+        }
+    }
+    fn write_instruments(&mut self, instruments:&Vec<Instrument>) {
+        self.write::<u8>(instruments.len() as u8);
+        for instrument in instruments {
+            self.write_string(instrument.name.clone())
+            .write_string(instrument.file.clone())
+            .write::<u8>(instrument.key)
+            .write::<u8>(instrument.press_key);
+        }
+    }    
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -381,5 +455,21 @@ mod tests {
         assert_eq!(file.header.right_clicks, 32);
         assert_eq!(file.header.blocks_added, 212);
         assert_eq!(file.header.blocks_removed, 27);
+    }
+
+    #[test]
+    fn save_nbs_file() {
+        let file_data = include_bytes!("../assets/nyan_cat.nbs");
+        let mut parser = NbsParser::new(file_data);
+        let file = parser.parse().unwrap();
+
+        let mut writer = NbsWriter::new();
+        let new_data = writer.write_file(&file);
+
+        // save new data to a file
+        let mut new_file = std::fs::File::create("./assets/nyan_cat_new.nbs").unwrap();
+        new_file.write_all(new_data.as_slice()).unwrap();
+    
+        assert_eq!(file_data, new_data.as_slice());
     }
 }
