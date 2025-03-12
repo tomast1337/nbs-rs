@@ -172,6 +172,8 @@ impl NbsFile {
 /// NbsParser is used to parse the data from a .nbs file
 /// The data is stored in the NbsFile struct
 /// The parse method is used to parse the data from the file
+/// An explanation of the NBS file format can be found here:
+/// <https://opennbs.org/nbs>
 pub struct NbsParser<'a> {
     current_data: &'a [u8],
 }
@@ -274,7 +276,6 @@ impl<'a> NbsParser<'a> {
     fn parse_layers(&mut self) -> io::Result<Vec<Layer>> {
         let mut layers = Vec::new();
         let mut layer_id: u16 = 0;
-
         while self.current_data.len() > 0 {
             let name = self.read_string()?;
             if name.is_empty() {
@@ -426,6 +427,10 @@ mod tests {
         let mut parser = NbsParser::new(file_data);
 
         let file = parser.parse().unwrap();
+
+        println!("Layers: {:?}", file.layers);
+        println!("Instruments: {:?}", file.instruments);
+
 
         assert_eq!(file.header.version, 5);
         assert_eq!(file.header.song_name, b"Nyan Cat");
