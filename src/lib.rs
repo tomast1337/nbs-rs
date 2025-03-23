@@ -1,14 +1,29 @@
+use core::fmt;
+use std::fmt::{Formatter, Result};
 use std::io::{self, Write};
 use std::vec::Vec;
 
 const CURRENT_NBS_VERSION: u8 = 5;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Instrument {
     pub name: Vec<u8>,
     pub file: Vec<u8>,
     pub key: u8,
     pub press_key: u8,
+}
+
+impl std::fmt::Debug for Instrument {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        write!(
+            f,
+            "Instrument {{ name: {:?}, file: {:?}, key: {}, press_key: {} }}",
+            String::from_utf8(self.name.clone()).unwrap_or("Invalid UTF-8".into()),
+            String::from_utf8(self.file.clone()).unwrap_or("Invalid UTF-8".into()),
+            self.key,
+            self.press_key
+        )
+    }
 }
 
 impl Instrument {
@@ -55,7 +70,7 @@ impl Note {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Layer {
     pub id: u16,
     pub name: Vec<u8>,
@@ -63,7 +78,22 @@ pub struct Layer {
     pub volume: u8,
     pub panning: u8,
 }
-#[derive(Debug, Clone)]
+
+impl fmt::Debug for Layer {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        write!(
+            f,
+            "Layer {{ id: {}, name: {:?}, lock: {}, volume: {}, panning: {} }}",
+            self.id,
+            String::from_utf8(self.name.clone()).unwrap_or("Invalid UTF-8".into()),
+            self.lock,
+            self.volume,
+            self.panning
+        )
+    }
+}
+
+#[derive(Clone)]
 pub struct Header {
     pub version: u8,
     pub default_instruments: u8,
@@ -86,6 +116,36 @@ pub struct Header {
     pub loop_flag: bool,
     pub max_loop_count: u8,
     pub loop_start: u16,
+}
+
+impl fmt::Debug for Header {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        write!(
+            f,
+            "Header {{ version: {}, default_instruments: {}, song_length: {}, song_layers: {}, song_name: {:?}, song_author: {:?}, original_author: {:?}, description: {:?}, tempo: {}, auto_save: {}, auto_save_duration: {}, time_signature: {}, minutes_spent: {}, left_clicks: {}, right_clicks: {}, blocks_added: {}, blocks_removed: {}, song_origin: {:?}, loop_flag: {}, max_loop_count: {}, loop_start: {} }}",
+            self.version,
+            self.default_instruments,
+            self.song_length,
+            self.song_layers,
+            String::from_utf8(self.song_name.clone()).unwrap_or("Invalid UTF-8".into()),
+            String::from_utf8(self.song_author.clone()).unwrap_or("Invalid UTF-8".into()),
+            String::from_utf8(self.original_author.clone()).unwrap_or("Invalid UTF-8".into()),
+            String::from_utf8(self.description.clone()).unwrap_or("Invalid UTF-8".into()),
+            self.tempo,
+            self.auto_save,
+            self.auto_save_duration,
+            self.time_signature,
+            self.minutes_spent,
+            self.left_clicks,
+            self.right_clicks,
+            self.blocks_added,
+            self.blocks_removed,
+            String::from_utf8(self.song_origin.clone()).unwrap_or("Invalid UTF-8".into()),
+            self.loop_flag,
+            self.max_loop_count,
+            self.loop_start
+        )
+    }
 }
 
 impl Header {
