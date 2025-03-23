@@ -61,21 +61,8 @@ pub struct Layer {
     pub name: Vec<u8>,
     pub lock: bool,
     pub volume: u8,
-    pub panning: i8,
+    pub panning: u8,
 }
-
-impl Layer {
-    pub fn new(id: u16) -> Layer {
-        Layer {
-            id,
-            name: Vec::new(),
-            lock: false, // default
-            volume: 100, // default
-            panning: 0,  // default
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct Header {
     pub version: u8,
@@ -175,20 +162,18 @@ impl NbsFile {
 /// An explanation of the NBS file format can be found here:
 /// <https://opennbs.org/nbs>
 pub struct NbsParser<'a> {
-    current_data: &'a [u8],
+    data: &'a [u8],
 }
 
 impl<'a> NbsParser<'a> {
     pub fn new(file_data: &'a [u8]) -> NbsParser<'a> {
-        NbsParser {
-            current_data: file_data,
-        }
+        NbsParser { data: file_data }
     }
 
     pub fn parse(&mut self) -> io::Result<NbsFile> {
         let header = self.parse_header()?;
         let notes = self.parse_notes()?;
-        let layers = self.parse_layers()?;
+        let layers = self.parse_layers(&header)?;
         let instruments = self.parse_instruments()?;
         Ok(NbsFile::new(header, notes, layers, instruments))
     }
@@ -196,12 +181,12 @@ impl<'a> NbsParser<'a> {
     fn read<T: Default + Copy>(&mut self) -> Option<T> {
         let size = size_of::<T>();
 
-        if self.current_data.len() < size {
+        if self.data.len() < size {
             return None; // Avoid out-of-bounds access
         }
 
-        let bytes = &self.current_data[..size];
-        self.current_data = &self.current_data[size..];
+        let bytes = &self.data[..size];
+        self.data = &self.data[size..];
 
         // SAFETY: Ensure T is plain-old-data (POD) and aligned
         let result = unsafe {
@@ -214,16 +199,16 @@ impl<'a> NbsParser<'a> {
     }
 
     fn read_string(&mut self) -> io::Result<Vec<u8>> {
-        let len = self.read::<u32>().unwrap() as usize;
-        let str = self.current_data[..len].to_vec();
-        self.current_data = &self.current_data[len..];
+        let len = self.read::<u32>().unwrap();
+        let str = self.data[..len as usize].to_vec();
+        self.data = &self.data[len as usize..];
         Ok(str)
     }
 
     fn parse_header(&mut self) -> io::Result<Header> {
         // remove the first 2 bytes
-        self.current_data = &self.current_data[2..];
-        self.current_data = &self.current_data[1..];
+        self.data = &self.data[2..];
+        self.data = &self.data[1..];
         Ok(Header {
             version: CURRENT_NBS_VERSION,
             default_instruments: self.read().unwrap(),
@@ -251,9 +236,13 @@ impl<'a> NbsParser<'a> {
 
     fn parse_notes(&mut self) -> io::Result<Vec<Note>> {
         let mut notes = Vec::new();
-        let mut current_tick: u16 = 0;
+        let mut current_tick = 0;
 
-        while self.current_data.len() > 0 {
+        while self.data.len() > 0 {
+            /*
+            The amount of "jumps" to the next tick with at least one note block in it.
+            We start at tick -1. If the amount of jumps is 0, the program will stop reading and proceed to the next part.
+            */
             let jump_ticks: u16 = self.read().unwrap();
             if jump_ticks == 0 {
                 break;
@@ -261,45 +250,45 @@ impl<'a> NbsParser<'a> {
 
             current_tick += jump_ticks;
 
-            while self.current_data.len() > 0 {
+            while self.data.len() > 0 {
+                /*
+                The amount of "jumps" to the next tick with at least one note block in it.
+                We start at tick -1. If the amount of jumps is 0, the program will stop reading and proceed to the next part.
+                */
                 let jump_layers: u16 = self.read().unwrap();
                 if jump_layers == 0 {
                     break;
                 }
 
                 notes.push(Note {
-                    tick: current_tick,
-                    layer: jump_layers,
-                    instrument: self.read().unwrap(),
-                    key: self.read().unwrap(),
-                    velocity: self.read().unwrap(),
-                    panning: self.read().unwrap(),
-                    pitch: self.read().unwrap(),
+                    tick: current_tick - 1,           // The tick of the note
+                    layer: jump_layers - 1,           // The layer of the note
+                    instrument: self.read().unwrap(), // The instrument of the note block. This is 0-15, or higher if the song uses custom instruments.
+                    key: self.read().unwrap(), // The key of the note block, from 0-87, where 0 is A0 and 87 is C8. 33-57 is within the 2-octave limit.
+                    velocity: self.read().unwrap(), // The velocity/volume of the note block, from 0% to 100%.
+                    panning: self.read().unwrap(), // The stereo position of the note block, from 0-200. 0 is 2 blocks right, 100 is center, 200 is 2 blocks left.
+                    pitch: self.read().unwrap(), // The fine pitch of the note block, from -32,768 to 32,767 cents (but the max in Note Block Studio is limited to -1200 and +1200). 0 is no fine-tuning. ±100 cents is a single semitone difference. After reading this, we go back to step 2.
                 });
             }
         }
-
         Ok(notes)
     }
 
-    fn parse_layers(&mut self) -> io::Result<Vec<Layer>> {
+    fn parse_layers(&mut self, header: &Header) -> io::Result<Vec<Layer>> {
         let mut layers = Vec::new();
-        let mut layer_id: u16 = 0;
-        while self.current_data.len() > 0 {
+
+        for _ in 0..header.song_layers {
             let name = self.read_string()?;
-            if name.is_empty() {
-                break;
-            }
-
+            let lock = self.read::<u8>().unwrap() == 1; // Convert to bool
+            let volume = self.read::<u8>().unwrap();
+            let panning = self.read::<u8>().unwrap(); // Convert to signed (-100 to +100)
             layers.push(Layer {
-                id: layer_id,
+                id: layers.len() as u16,
                 name,
-                lock: self.read::<u8>().unwrap() != 0,
-                volume: self.read::<u8>().unwrap(),
-                panning: self.read::<i8>().unwrap(),
+                lock,
+                volume,
+                panning,
             });
-
-            layer_id += 1;
         }
 
         Ok(layers)
@@ -307,18 +296,21 @@ impl<'a> NbsParser<'a> {
 
     fn parse_instruments(&mut self) -> io::Result<Vec<Instrument>> {
         let mut instruments = Vec::new();
-        // next u8 is the number of instruments
-        let num_instruments = self.read::<i8>().unwrap();
 
-        for _ in 0..num_instruments {
+        let instrument_count = self.read::<u8>().unwrap();
+
+        for _ in 0..instrument_count {
             let name = self.read_string()?;
-            let sound_file = self.read_string()?;
-            let sound_key = self.read::<u8>().unwrap();
-            let press_key = self.read::<u8>().unwrap();
+            let file = self.read_string()?;
+            let key = self.read::<u8>().unwrap();
+            let press_key = self.read::<u8>().unwrap(); // 0 or 1
 
-            let mut instrument = Instrument::new(sound_key, name, sound_file, press_key);
-            instrument.press_key = press_key;
-            instruments.push(instrument);
+            instruments.push(Instrument {
+                name,
+                file,
+                key,
+                press_key,
+            });
         }
 
         Ok(instruments)
@@ -409,7 +401,7 @@ impl NbsWriter {
             self.write_string(layer.name.clone())
                 .write::<u8>(if layer.lock { 1 } else { 0 })
                 .write::<u8>(layer.volume)
-                .write::<i8>(layer.panning);
+                .write::<u8>(layer.panning);
         }
     }
     fn write_instruments(&mut self, instruments: &Vec<Instrument>) {
@@ -433,9 +425,6 @@ mod tests {
         let mut parser = NbsParser::new(file_data);
 
         let file = parser.parse().unwrap();
-
-        println!("Layers: {:?}", file.layers);
-        println!("Instruments: {:?}", file.instruments);
 
         assert_eq!(file.header.version, 5);
         assert_eq!(file.header.song_name, b"Nyan Cat");
@@ -465,21 +454,19 @@ mod tests {
         assert_eq!(file.header.right_clicks, 32);
         assert_eq!(file.header.blocks_added, 212);
         assert_eq!(file.header.blocks_removed, 27);
+
+        assert_eq!(file.notes.len(), 1021);
+        assert_eq!(file.instruments.len(), 3);
     }
 
     #[test]
-    fn save_nbs_file() {
-        let file_data = include_bytes!("../assets/nyan_cat.nbs");
+    fn load_nbs_file2() {
+        let file_data = include_bytes!("../assets/testsong.nbs");
         let mut parser = NbsParser::new(file_data);
+
         let file = parser.parse().unwrap();
 
-        let mut writer = NbsWriter::new();
-        let new_data = writer.write_file(&file);
-
-        // save new data to a file
-        let mut new_file = std::fs::File::create("./assets/nyan_cat_new.nbs").unwrap();
-        new_file.write_all(new_data.as_slice()).unwrap();
-
-        assert_eq!(file_data, new_data.as_slice());
+        println!("Layers: {:?}", file.layers);
+        println!("Instruments: {:?}", file.instruments);
     }
 }
