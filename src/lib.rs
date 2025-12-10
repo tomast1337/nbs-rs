@@ -388,12 +388,11 @@ impl NbsWriter {
         NbsWriter { data: Vec::new() }
     }
 
-    pub fn write_file(&mut self, file: &NbsFile) -> Vec<u8> {
+    pub fn get_file_bytes(&mut self, file: &NbsFile) -> Vec<u8> {
         self.write_header(&file.header);
         self.write_notes(&file.notes);
         self.write_layers(&file.layers);
         self.write_instruments(&file.instruments);
-
         self.data.clone()
     }
 
@@ -416,9 +415,9 @@ impl NbsWriter {
     }
 
     fn write_header(&mut self, header: &Header) {
-        // add 2 bytes for the version
-        self.write::<u8>(0).write::<u8>(0);
-        // write the header
+        // Write "New Format" marker (0 length)
+        self.write::<u16>(0); 
+        
         self.write::<u8>(header.version)
             .write::<u8>(header.default_instruments)
             .write::<u16>(header.song_length)
@@ -441,21 +440,66 @@ impl NbsWriter {
             .write::<u8>(header.max_loop_count)
             .write::<u16>(header.loop_start);
     }
-    fn write_notes(&mut self, notes: &Vec<Note>) {
-        let mut current_tick: u16 = 0;
-        for note in notes {
-            let jump_ticks = note.tick - current_tick;
-            self.write::<u16>(jump_ticks);
-            current_tick = note.tick;
 
-            self.write::<u16>(note.layer)
-                .write::<u8>(note.instrument)
+    fn write_notes(&mut self, notes: &Vec<Note>) {
+        if notes.is_empty() {
+            self.write::<u16>(0); // End of notes
+            return;
+        }
+
+        // 1. Sort notes by Tick, then by Layer
+        let mut sorted_notes = notes.clone();
+        sorted_notes.sort_by(|a, b| {
+            if a.tick != b.tick {
+                a.tick.cmp(&b.tick)
+            } else {
+                a.layer.cmp(&b.layer)
+            }
+        });
+
+        let mut current_tick: i32 = -1;
+        let mut current_layer: i32 = -1;
+
+        for note in sorted_notes {
+            let note_tick = note.tick as i32;
+            let note_layer = note.layer as i32;
+
+            // If we moved to a new tick
+            if note_tick != current_tick {
+                // If this isn't the very first tick processed, we need to close the 
+                // previous tick's layer loop
+                if current_tick != -1 {
+                    self.write::<u16>(0); // End of layers for previous tick
+                }
+
+                // Write jump to this tick
+                let jump_ticks = (note_tick - current_tick) as u16;
+                self.write::<u16>(jump_ticks);
+
+                current_tick = note_tick;
+                current_layer = -1; // Reset layer for new tick
+            }
+
+            // Write jump to this layer
+            let jump_layers = (note_layer - current_layer) as u16;
+            self.write::<u16>(jump_layers);
+            
+            current_layer = note_layer;
+
+            // Write Note Data
+            self.write::<u8>(note.instrument)
                 .write::<u8>(note.key)
                 .write::<u8>(note.velocity)
                 .write::<i8>(note.panning)
                 .write::<i16>(note.pitch);
         }
+
+        // Close the final tick's layer loop
+        self.write::<u16>(0);
+        // Close the note stream (0 jump ticks)
+        self.write::<u16>(0);
     }
+
     fn write_layers(&mut self, layers: &Vec<Layer>) {
         for layer in layers {
             self.write_string(layer.name.clone())
@@ -464,6 +508,7 @@ impl NbsWriter {
                 .write::<u8>(layer.panning);
         }
     }
+
     fn write_instruments(&mut self, instruments: &Vec<Instrument>) {
         self.write::<u8>(instruments.len() as u8);
         for instrument in instruments {
@@ -474,7 +519,6 @@ impl NbsWriter {
         }
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -520,13 +564,16 @@ mod tests {
     }
 
     #[test]
-    fn load_nbs_file2() {
-        let file_data = include_bytes!("../assets/testsong.nbs");
+    fn write_nbs_file() {
+        // read nyan_cat.nbs
+        let file_data = include_bytes!("../assets/nyan_cat.nbs");
         let mut parser = NbsParser::new(file_data);
-
         let file = parser.parse().unwrap();
 
-        println!("Layers: {:?}", file.layers);
-        println!("Instruments: {:?}", file.instruments);
+        // write nyan_cat.nbs
+        let mut writer = NbsWriter::new();
+        let data = writer.get_file_bytes(&file);
+        // if the size of the data is the same it means the serialization is successful
+        assert_eq!(data.len(), file_data.len());
     }
 }
