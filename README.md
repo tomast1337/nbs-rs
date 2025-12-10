@@ -92,7 +92,3 @@ The library exposes four main structs that map directly to the NBS specification
 ## Contributing
 
 Contributions are welcome. Please ensure that any changes to the parser or writer logic maintain compatibility with the official [OpenNBS specification](https://opennbs.org/nbs).
-
-## License
-
-This project is open source. Please refer to the repository for license information.
