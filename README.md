@@ -1,5 +1,7 @@
 # nbs-rs
 
+<img width="256" height="256" alt="nbs-rs" src="https://github.com/user-attachments/assets/f46c482e-a6ae-4b00-9399-b84e5813d13f" />
+
 **nbs-rs** is a lightweight, zero-dependency Rust library for parsing and serializing **OpenNBS** (`.nbs`) files, the format used by [Open Note Block Studio](https://opennbs.org/).
 
 This library focuses exclusively on data manipulation and format compliance. It allows you to convert raw byte arrays into structured Rust types and back again, giving you full control over the file implementation logic.
